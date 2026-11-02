@@ -1,9 +1,13 @@
 /**
  * The collection: the crew picks up a business's weekly protection money.
  *
- * The job runs in three stages (arrive, inside, leave). Each stage rolls skill checks for
- * the crew member in the right role, and what happens is written to a log as message keys,
- * so the play-by-play can be shown in any language. Nothing here draws or prints anything.
+ * The job runs in three stages (arrive, inside, leave) and plays out one line of commentary
+ * at a time. Each line is a beat. After a beat the boss can make a sideline call (pull out,
+ * go loud or lie low) and the job carries on from there with the new plan.
+ *
+ * Each stage rolls skill checks for the crew member in the right role, and what happens is
+ * written to a log as message keys, so the play-by-play can be shown in any language.
+ * Nothing here draws or prints anything.
  */
 import type { MessageKey } from '../../i18n/en';
 import { check, type CheckResult } from '../checks';
@@ -17,7 +21,23 @@ export type Crew = Readonly<Record<Role, CrewMember>>;
 
 /** Quiet: the talker tries first. Loud: the muscle goes in first, for more money and more heat. */
 export type Approach = 'quiet' | 'loud';
-export type Outcome = 'clean' | 'messy' | 'botched' | 'busted';
+
+/**
+ * The sideline calls the boss can make while a job plays.
+ *
+ * - pullOut: everyone leaves at once. No money, but no more risk.
+ * - goLoud: in a quiet job, the muscle goes in. More money, more heat.
+ * - lieLow: the crew waits until a patrol car or the rivals have gone. Safer, but it takes
+ *   time and the owner gets edgy.
+ */
+export const CALLS = ['pullOut', 'goLoud', 'lieLow'] as const;
+export type Call = (typeof CALLS)[number];
+
+/** calledOff means the boss pulled the crew out. */
+export type Outcome = 'clean' | 'messy' | 'botched' | 'busted' | 'calledOff';
+
+/** The message keys a collection can write to its log. */
+export type CollectionKey = Extract<MessageKey, `collection.${string}`>;
 
 export interface CollectionPlan {
   readonly crew: Crew;
@@ -29,8 +49,25 @@ export interface CollectionPlan {
 export interface LogEntry {
   /** Minutes after midnight on the night the job starts, so 1421 is 23:41. */
   readonly minute: number;
-  readonly key: MessageKey;
+  readonly key: CollectionKey;
   readonly params: Readonly<Record<string, string | number>>;
+  /** The crew member a line is about, on lines about one person such as injuries and arrests. */
+  readonly subject?: Role;
+}
+
+/** One line of the play-by-play, as the boss sees it while the job plays. */
+export interface Beat {
+  /** Where the line sits in the log, counting from 0. */
+  readonly index: number;
+  readonly entry: LogEntry;
+  /** The calls the crew can act on straight after this line. Often none. */
+  readonly calls: readonly Call[];
+}
+
+/** A call the boss made, and the beat it was made on. */
+export interface CallMade {
+  readonly beat: number;
+  readonly call: Call;
 }
 
 export interface Injury {
@@ -52,7 +89,15 @@ export interface CollectionResult {
   /** A score out of 10 for each role, like Football Manager's match ratings. */
   readonly ratings: Readonly<Record<Role, number>>;
   readonly log: readonly LogEntry[];
+  /** The calls the boss made. The same seed with the same calls always plays out the same way. */
+  readonly calls: readonly CallMade[];
 }
+
+/**
+ * A collection being played one beat at a time. Each `next()` gives the next beat. Pass it the
+ * boss's call for the beat just shown, or nothing. When the job is over it gives the result.
+ */
+export type CollectionPlay = Generator<Beat, CollectionResult, Call | undefined>;
 
 /** Every balance number in one place. Difficulties are for a d20 plus the skill. */
 export const TUNING = {
@@ -73,6 +118,21 @@ export const TUNING = {
   driverNerveDifficulty: 11,
   footChaseDifficulty: 17,
   dodgeBrawlDifficulty: 14,
+  /** Keeping the owner calm while the crew waits out the rivals inside. Harder after a loud job. */
+  keepOwnerSweetDifficulty: 14,
+  keepOwnerSweetAfterLoud: 4,
+  /** Each time the crew lies low before going in, the owner is this much harder to deal with. */
+  edgyOwner: 2,
+  /** ...and this much more likely to lock up for the night instead. */
+  ownerLocksUp: 0.2,
+  /** Chance the rivals give up while the crew waits them out inside. */
+  rivalsGiveUp: 0.55,
+  /** How long lying low takes, in minutes. */
+  lieLowMinutes: {
+    patrol: [10, 16],
+    rivals: [8, 14],
+    blocked: [12, 20],
+  },
   /** Going loud collects the envelope plus a late fee for the trouble. */
   lateFee: 1.25,
   partialPayment: 0.5,
@@ -96,6 +156,7 @@ export const TUNING = {
     doormanFight: 3,
     partial: 4,
     callsPolice: 2,
+    ownerPhones: 2,
     rivalsBackOff: 3,
     handsOver: 1,
     rivalsBrawl: 5,
@@ -110,6 +171,7 @@ const OUTCOME_RATING: Readonly<Record<Outcome, number>> = {
   messy: 0,
   botched: -0.6,
   busted: -0.8,
+  calledOff: 0,
 };
 
 /** Generates a crew of four for the job, built around `quality` (1 to 20), with no shared names. */
@@ -129,22 +191,81 @@ export function generateCrew(rng: Rng, quality: number): Crew {
   return crew;
 }
 
-/** Plays out one collection. The same plan and generator state always give the same result. */
-export function runCollection(plan: CollectionPlan, rng: Rng): CollectionResult {
-  return new CollectionRun(plan, rng).run();
+/** Starts a collection that plays one beat at a time, so the boss can make calls as it goes. */
+export function playCollection(plan: CollectionPlan, rng: Rng): CollectionPlay {
+  return new CollectionRun(plan, rng).play();
+}
+
+/**
+ * Plays out a whole collection at once, making the given calls at the given beats.
+ * The same plan, generator state and calls always give the same result.
+ */
+export function runCollection(
+  plan: CollectionPlan,
+  rng: Rng,
+  calls: readonly CallMade[] = [],
+): CollectionResult {
+  const play = playCollection(plan, rng);
+  let step = play.next();
+  while (!step.done) {
+    const index = step.value.index;
+    step = play.next(calls.find((made) => made.beat === index)?.call);
+  }
+  return step.value;
+}
+
+type Stage = 'arrive' | 'inside' | 'leave';
+
+/** A danger in plain sight that the crew could lie low to avoid. */
+type Threat = 'patrol' | 'rivalsCircling' | 'rivalsBlocking';
+
+interface SayOptions {
+  /** A danger the line reveals, which lets the boss call for the crew to lie low. */
+  readonly threat?: Threat;
+  /** The crew member the line is about. */
+  readonly subject?: Role;
+  /** True when no call can be made on this line, because the next line is part of the same moment. */
+  readonly noCalls?: boolean;
+}
+
+/** What a step of the run gives back: beats while it plays, then an optional value. */
+type Beats<T = void> = Generator<Beat, T, Call | undefined>;
+
+/**
+ * Thrown inside a run when a call means dropping whatever the crew was doing. It unwinds to
+ * the stage that deals with it: inside() for going loud, play() for pulling out.
+ */
+class ChangeOfPlan extends Error {
+  constructor(readonly call: 'pullOut' | 'goLoud') {
+    super(`The boss called ${call}`);
+    this.name = 'ChangeOfPlan';
+  }
 }
 
 class CollectionRun {
+  private stage: Stage = 'arrive';
   private minute: number = TUNING.startMinute;
   private heat = 0;
   private money = 0;
   private skimmed = 0;
+  /** True once the muscle is doing the persuading, by plan or by the boss's call. */
+  private loud: boolean;
   private escalated = false;
+  /** True if the owner locked up rather than open the door to the crew. */
+  private lockedOut = false;
   private chased = false;
   private confronted = false;
+  private pulledOut = false;
   private policeAlerted = false;
+  /** Who has gone into the business so far. */
+  private goneIn: 'nobody' | 'talker' | 'both' = 'nobody';
+  /** How many times the crew lay low before going in. The owner notices the car outside. */
+  private edginess = 0;
+  /** How hard the owner is to talk round or scare, on top of the base difficulty. */
+  private ownerResist = 0;
   private rivals: 'none' | 'spotted' | 'unseen' = 'none';
   private readonly log: LogEntry[] = [];
+  private readonly callsMade: CallMade[] = [];
   private readonly injuries: Injury[] = [];
   private readonly arrests: string[] = [];
   private readonly ratingChange: Record<Role, number> = {
@@ -161,6 +282,7 @@ class CollectionRun {
     private readonly plan: CollectionPlan,
     private readonly rng: Rng,
   ) {
+    this.loud = plan.approach === 'loud';
     this.planBonus = Math.trunc((this.bestPlanner().skills.planning - 10) / 4);
     this.baseParams = {
       driver: plan.crew.driver.firstName,
@@ -171,41 +293,50 @@ class CollectionRun {
     };
   }
 
-  run(): CollectionResult {
-    this.arrive();
-    this.inside();
-    this.leave();
+  *play(): Beats<CollectionResult> {
+    try {
+      yield* this.arrive();
+      yield* this.inside();
+    } catch (error) {
+      if (!(error instanceof ChangeOfPlan && error.call === 'pullOut')) throw error;
+      yield* this.pullOut();
+      return this.result();
+    }
+    yield* this.leave();
     return this.result();
   }
 
   // Stage 1: getting into position, watching for police and rivals.
-  private arrive(): void {
-    this.say(this.oneOf(['collection.arrive.parkAlley', 'collection.arrive.parkStreet'] as const));
+  private *arrive(): Beats {
+    yield* this.say(
+      this.oneOf(['collection.arrive.parkAlley', 'collection.arrive.parkStreet'] as const),
+    );
     this.wait(1, 3);
-    this.say('collection.arrive.lookout');
+    yield* this.say('collection.arrive.lookout');
     if (this.planBonus >= 2) {
-      this.say('collection.arrive.goodPlan', { planner: this.bestPlanner().firstName });
+      yield* this.say('collection.arrive.goodPlan', { planner: this.bestPlanner().firstName });
     } else if (this.planBonus <= -2) {
-      this.say('collection.arrive.badPlan');
+      yield* this.say('collection.arrive.badPlan');
     }
 
     if (this.rng.chance(this.plan.district.patrol)) {
       this.wait(2, 5);
       if (this.test('lookout', 'discretion', TUNING.spotPatrolDifficulty).success) {
-        this.say('collection.patrol.spotted');
+        // A sharp lookout gets everyone down in time, which is lying low without being told.
         this.rate('lookout', 0.6);
+        yield* this.say('collection.patrol.spotted');
         this.wait(3, 6);
       } else {
         this.rate('lookout', -0.4);
         if (this.test('driver', 'composure', TUNING.coolDriverDifficulty).success) {
-          this.say('collection.patrol.coolDriver');
           this.heat += TUNING.heat.coolDriver;
           this.rate('driver', 0.4);
+          yield* this.say('collection.patrol.coolDriver');
         } else {
-          this.say('collection.patrol.noticed');
           this.policeAlerted = true;
           this.heat += TUNING.heat.noticed;
           this.rate('driver', -0.6);
+          yield* this.say('collection.patrol.noticed', {}, { threat: 'patrol' });
         }
       }
     }
@@ -214,8 +345,8 @@ class CollectionRun {
       if (this.test('lookout', 'discretion', TUNING.spotRivalsDifficulty).success) {
         this.wait(1, 3);
         this.rivals = 'spotted';
-        this.say('collection.rivals.spotted');
         this.rate('lookout', 0.5);
+        yield* this.say('collection.rivals.spotted', {}, { threat: 'rivalsCircling' });
       } else {
         this.rivals = 'unseen';
       }
@@ -223,63 +354,108 @@ class CollectionRun {
   }
 
   // Stage 2: getting the envelope.
-  private inside(): void {
+  private *inside(): Beats {
+    this.stage = 'inside';
+    this.ownerResist =
+      Math.floor(this.plan.business.resolve / 2) + this.edginess * TUNING.edgyOwner;
     this.wait(2, 4);
-    const halfResolve = Math.floor(this.plan.business.resolve / 2);
 
-    if (this.plan.approach === 'quiet') {
-      this.heat += TUNING.heat.quiet;
-      this.say('collection.quiet.enter');
-      this.wait(2, 4);
-      const talk = this.test('talker', 'talking', TUNING.talkDifficulty + halfResolve);
-      if (talk.roll === 1) {
-        this.say('collection.quiet.saysTooMuch');
-        this.heat += TUNING.heat.saysTooMuch;
-        this.rate('talker', -0.8);
-      }
-      if (talk.success) {
-        this.money = this.plan.business.envelope;
-        const key =
-          talk.margin >= 8
-            ? 'collection.quiet.paysWarmly'
-            : this.oneOf(['collection.quiet.pays', 'collection.quiet.paysFamily'] as const);
-        this.say(key, { amount: this.money });
-        this.rate('talker', 0.5 + Math.min(talk.margin, 10) / 10);
-      } else {
-        this.say('collection.quiet.stalls');
-        this.wait(1, 3);
-        if (this.test('talker', 'composure', TUNING.talkDifficulty + halfResolve).success) {
-          this.money = this.plan.business.envelope;
-          this.say('collection.quiet.talkedRound', { amount: this.money });
-          this.rate('talker', 0.3);
-        } else {
-          this.escalated = true;
-          this.rate('talker', -0.7);
-          this.say('collection.quiet.muscleStepsIn');
-          this.wait(1, 2);
-          this.intimidate(halfResolve, TUNING.heat.escalated, 1);
+    try {
+      if (this.edginess > 0) {
+        if (this.rng.chance(TUNING.ownerLocksUp * this.edginess)) {
+          this.lockedOut = true;
+          yield* this.say('collection.inside.lockedUp');
+          return;
         }
+        yield* this.say('collection.inside.ownerEdgy');
       }
-    } else {
-      this.say('collection.loud.enter');
-      this.wait(1, 3);
-      this.intimidate(halfResolve, TUNING.heat.loud, TUNING.lateFee);
-      if (this.test('talker', 'talking', TUNING.calmRoomDifficulty).success) {
-        this.say('collection.loud.calmsRoom');
-        this.heat += TUNING.heat.calmedRoom;
-        this.rate('talker', 0.5);
+      if (this.loud) {
+        yield* this.bargeIn();
+      } else {
+        yield* this.askNicely();
       }
-      if (this.rng.chance(TUNING.policeCalledWhenLoud)) {
-        this.say('collection.loud.callsPolice');
-        this.policeAlerted = true;
-        this.heat += TUNING.heat.callsPolice;
-      }
+    } catch (error) {
+      if (!(error instanceof ChangeOfPlan && error.call === 'goLoud')) throw error;
+      yield* this.goLoud();
     }
 
     this.skim();
   }
 
-  private intimidate(halfResolve: number, heat: number, paymentRate: number): void {
+  /** The quiet way: the talker goes in alone and asks for the envelope. */
+  private *askNicely(): Beats {
+    this.heat += TUNING.heat.quiet;
+    this.goneIn = 'talker';
+    yield* this.say('collection.quiet.enter');
+    this.wait(2, 4);
+
+    const talk = this.test('talker', 'talking', TUNING.talkDifficulty + this.ownerResist);
+    if (talk.roll === 1) {
+      this.heat += TUNING.heat.saysTooMuch;
+      this.rate('talker', -0.8);
+      yield* this.say('collection.quiet.saysTooMuch', {}, { noCalls: true });
+    }
+    if (talk.success) {
+      this.money = this.plan.business.envelope;
+      this.rate('talker', 0.5 + Math.min(talk.margin, 10) / 10);
+      const key =
+        talk.margin >= 8
+          ? 'collection.quiet.paysWarmly'
+          : this.oneOf(['collection.quiet.pays', 'collection.quiet.paysFamily'] as const);
+      yield* this.say(key, { amount: this.money });
+      return;
+    }
+
+    yield* this.say('collection.quiet.stalls');
+    this.wait(1, 3);
+    if (this.test('talker', 'composure', TUNING.talkDifficulty + this.ownerResist).success) {
+      this.money = this.plan.business.envelope;
+      this.rate('talker', 0.3);
+      yield* this.say('collection.quiet.talkedRound', { amount: this.money });
+      return;
+    }
+
+    this.escalated = true;
+    this.goneIn = 'both';
+    this.rate('talker', -0.7);
+    yield* this.say('collection.quiet.muscleStepsIn');
+    this.wait(1, 2);
+    yield* this.intimidate(TUNING.heat.escalated, 1);
+  }
+
+  /** The loud way, as planned: the muscle goes in first. */
+  private *bargeIn(): Beats {
+    this.goneIn = 'both';
+    yield* this.say('collection.loud.enter');
+    this.wait(1, 3);
+    yield* this.leanOn();
+  }
+
+  /** The boss's call to send the muscle into a quiet job. It's a loud job from here on. */
+  private *goLoud(): Beats {
+    this.loud = true;
+    this.goneIn = 'both';
+    yield* this.say('collection.goLoud.walksIn');
+    this.wait(1, 2);
+    yield* this.leanOn();
+  }
+
+  /** The muscle collects the envelope plus a late fee; the talker keeps the room calm. */
+  private *leanOn(): Beats {
+    yield* this.intimidate(TUNING.heat.loud, TUNING.lateFee);
+    if (this.test('talker', 'talking', TUNING.calmRoomDifficulty).success) {
+      this.heat += TUNING.heat.calmedRoom;
+      this.rate('talker', 0.5);
+      yield* this.say('collection.loud.calmsRoom');
+    }
+    if (this.rng.chance(TUNING.policeCalledWhenLoud)) {
+      this.policeAlerted = true;
+      this.heat += TUNING.heat.callsPolice;
+      yield* this.say('collection.loud.callsPolice');
+    }
+  }
+
+  private *intimidate(heat: number, paymentRate: number): Beats {
     this.heat += heat;
     const doorman = this.plan.business.doorman;
     if (doorman > 0) {
@@ -289,30 +465,35 @@ class CollectionRun {
         TUNING.doormanDifficulty + Math.floor(doorman / 2),
       );
       if (faceOff.success) {
-        this.say('collection.loud.doormanBacksOff');
         this.rate('muscle', 0.5);
+        yield* this.say('collection.loud.doormanBacksOff');
       } else {
-        this.say('collection.loud.doormanFight');
         this.heat += TUNING.heat.doormanFight;
         this.rate('muscle', -0.6);
-        this.injure('muscle', faceOff.roll === 1 ? 'serious' : 'minor');
+        yield* this.say('collection.loud.doormanFight', {}, { noCalls: true });
+        yield* this.injure('muscle', faceOff.roll === 1 ? 'serious' : 'minor');
       }
       this.wait(1, 2);
     }
 
     const nerveBonus = Math.trunc((this.plan.crew.muscle.skills.nerve - 10) / 5);
-    const scare = this.test('muscle', 'muscle', TUNING.scareDifficulty + halfResolve, nerveBonus);
+    const scare = this.test(
+      'muscle',
+      'muscle',
+      TUNING.scareDifficulty + this.ownerResist,
+      nerveBonus,
+    );
     if (scare.success) {
       this.money = Math.round(this.plan.business.envelope * paymentRate);
-      this.say(paymentRate > 1 ? 'collection.loud.paysLateFee' : 'collection.loud.pays', {
+      this.rate('muscle', 0.6);
+      yield* this.say(paymentRate > 1 ? 'collection.loud.paysLateFee' : 'collection.loud.pays', {
         amount: this.money,
       });
-      this.rate('muscle', 0.6);
     } else {
       this.money = Math.round(this.plan.business.envelope * TUNING.partialPayment);
-      this.say('collection.loud.partial', { amount: this.money });
       this.heat += TUNING.heat.partial;
       this.rate('muscle', -0.5);
+      yield* this.say('collection.loud.partial', { amount: this.money });
     }
   }
 
@@ -327,112 +508,247 @@ class CollectionRun {
   }
 
   // Stage 3: getting away, maybe past rivals or the police.
-  private leave(): void {
+  private *leave(): Beats {
+    this.stage = 'leave';
     this.wait(2, 4);
     const rivalsMove =
       this.rivals === 'spotted'
         ? this.rng.chance(TUNING.rivalsMoveWhenSpotted)
         : this.rivals === 'unseen' && this.rng.chance(TUNING.rivalsMoveWhenUnseen);
+
+    let calm = !rivalsMove;
+    if (rivalsMove) {
+      const expected = this.rivals === 'spotted';
+      const call = yield* this.say(
+        expected ? 'collection.leave.rivalsExpected' : 'collection.leave.rivalsAmbush',
+        {},
+        { threat: 'rivalsBlocking' },
+      );
+      if (this.rivals === 'none') {
+        // They gave up while the crew waited inside.
+        calm = true;
+      } else {
+        this.wait(1, 2);
+        yield* this.rivalsConfront(expected || call === 'lieLow');
+      }
+    }
+
     const policeCome = this.policeAlerted
       ? this.rng.chance(TUNING.policeReturn)
-      : this.rng.chance(
-          this.plan.approach === 'loud' ? TUNING.policePassByLoud : TUNING.policePassByQuiet,
-        );
-
-    if (rivalsMove) {
-      this.rivalsConfront();
-    }
+      : this.rng.chance(this.loud ? TUNING.policePassByLoud : TUNING.policePassByQuiet);
     if (policeCome) {
       this.wait(1, 3);
-      this.chase();
-    } else if (!rivalsMove) {
-      this.say(
+      yield* this.chase();
+    } else if (calm) {
+      yield* this.say(
         this.oneOf(['collection.leave.calmBoulevard', 'collection.leave.calmBeach'] as const),
       );
     }
   }
 
-  private rivalsConfront(): void {
+  private *rivalsConfront(expected: boolean): Beats {
     this.confronted = true;
-    const expected = this.rivals === 'spotted';
-    this.say(expected ? 'collection.leave.rivalsExpected' : 'collection.leave.rivalsAmbush');
-    this.wait(1, 2);
     const bonus = expected ? 2 : -2;
 
     if (!this.test('muscle', 'nerve', TUNING.rivalsNerveDifficulty, bonus).success) {
-      this.say('collection.leave.handsOver');
       this.money = 0;
       this.heat += TUNING.heat.handsOver;
       this.rate('muscle', -1);
+      yield* this.say('collection.leave.handsOver');
       return;
     }
 
     const standOff = this.test('muscle', 'muscle', TUNING.rivalsStandOffDifficulty, bonus);
     if (standOff.success) {
-      this.say('collection.leave.rivalsBackOff');
       this.heat += TUNING.heat.rivalsBackOff;
       this.rate('muscle', 0.8);
+      yield* this.say('collection.leave.rivalsBackOff');
       return;
     }
 
-    this.say('collection.leave.rivalsTakeIt');
     this.money = 0;
     this.heat += TUNING.heat.rivalsBrawl;
     this.rate('muscle', -0.8);
-    this.injure('muscle', standOff.roll === 1 ? 'serious' : 'minor');
+    yield* this.say('collection.leave.rivalsTakeIt', {}, { noCalls: true });
+    yield* this.injure('muscle', standOff.roll === 1 ? 'serious' : 'minor');
     const bystander = this.oneOf(['driver', 'talker', 'lookout'] as const);
     if (!this.test(bystander, 'fitness', TUNING.dodgeBrawlDifficulty).success) {
-      this.injure(bystander, 'minor');
+      yield* this.injure(bystander, 'minor');
     }
   }
 
-  private chase(): void {
+  private *chase(): Beats {
     this.chased = true;
-    this.say('collection.leave.sirens');
+    yield* this.say('collection.leave.sirens');
     let nerves = 0;
     if (!this.test('driver', 'nerve', TUNING.driverNerveDifficulty).success) {
-      this.say('collection.leave.driverRattled');
       nerves = -4;
+      yield* this.say('collection.leave.driverRattled');
     }
     const difficulty = TUNING.getawayDifficulty + (this.policeAlerted ? 2 : 0);
     const getaway = this.test('driver', 'driving', difficulty, nerves);
     this.wait(2, 5);
 
     if (getaway.success) {
-      this.say(
+      this.heat += TUNING.heat.chaseEscaped;
+      this.rate('driver', 1);
+      yield* this.say(
         this.oneOf([
           'collection.leave.escapeParkingLot',
           'collection.leave.escapeRedLights',
         ] as const),
       );
-      this.heat += TUNING.heat.chaseEscaped;
-      this.rate('driver', 1);
       return;
     }
 
-    this.say('collection.leave.boxedIn');
     this.rate('driver', -1);
+    yield* this.say('collection.leave.boxedIn', {}, { noCalls: true });
     for (const role of ROLES) {
-      const name = this.plan.crew[role].firstName;
+      const member = this.plan.crew[role];
       if (this.test(role, 'fitness', TUNING.footChaseDifficulty).success) {
-        this.say('collection.leave.escapesOnFoot', { name });
         this.rate(role, 0.3);
+        yield* this.say(
+          'collection.leave.escapesOnFoot',
+          { name: member.firstName },
+          { subject: role },
+        );
       } else {
-        this.arrests.push(this.plan.crew[role].id);
-        this.say('collection.leave.arrested', { name });
+        this.arrests.push(member.id);
         this.rate(role, -1.5);
+        yield* this.say('collection.leave.arrested', { name: member.firstName }, { subject: role });
       }
     }
-    if (this.arrests.includes(this.plan.crew.talker.id) && this.money > 0) {
-      this.say('collection.leave.envelopeSeized');
-      this.money = 0;
-    }
     this.heat += this.arrests.length > 0 ? TUNING.heat.arrests : TUNING.heat.chaseCaught;
+    if (this.arrests.includes(this.plan.crew.talker.id) && this.money > 0) {
+      this.money = 0;
+      yield* this.say('collection.leave.envelopeSeized');
+    }
+  }
+
+  // The boss's calls.
+
+  /** Pull out: everyone leaves now, without the money. Nothing else can go wrong. */
+  private *pullOut(): Beats {
+    this.pulledOut = true;
+    if (this.goneIn === 'nobody') {
+      yield* this.say('collection.pullOut.beforeGoingIn');
+      return;
+    }
+    yield* this.say(
+      this.goneIn === 'both' ? 'collection.pullOut.crewLeaves' : 'collection.pullOut.talkerLeaves',
+    );
+    this.wait(1, 2);
+    yield* this.say('collection.pullOut.driveAway');
+  }
+
+  /**
+   * Lie low: wait until the danger has gone. It takes time, and the owner notices: before the
+   * crew goes in, an edgy owner is harder to deal with and may lock up for the night.
+   */
+  private *lieLow(threat: Threat): Beats {
+    if (threat === 'rivalsBlocking') {
+      yield* this.waitOutRivals();
+      return;
+    }
+    this.edginess += 1;
+    if (threat === 'patrol') {
+      this.policeAlerted = false;
+      yield* this.say('collection.lieLow.patrol');
+      this.wait(...TUNING.lieLowMinutes.patrol);
+    } else {
+      this.rivals = 'none';
+      yield* this.say('collection.lieLow.rivals');
+      this.wait(...TUNING.lieLowMinutes.rivals);
+    }
+  }
+
+  /**
+   * The rivals are blocking the street, so the crew goes back inside until they give up. The
+   * owner wants them gone and may phone the police, and the rivals may still be there after.
+   */
+  private *waitOutRivals(): Beats {
+    yield* this.say('collection.lieLow.blocked');
+    this.wait(...TUNING.lieLowMinutes.blocked);
+    const difficulty =
+      TUNING.keepOwnerSweetDifficulty + (this.loud ? TUNING.keepOwnerSweetAfterLoud : 0);
+    if (this.test('talker', 'talking', difficulty).success) {
+      this.rate('talker', 0.3);
+      yield* this.say('collection.lieLow.ownerSweet');
+    } else {
+      this.policeAlerted = true;
+      this.heat += TUNING.heat.ownerPhones;
+      yield* this.say('collection.lieLow.ownerPhones');
+    }
+    this.wait(2, 4);
+    if (this.rng.chance(TUNING.rivalsGiveUp)) {
+      this.rivals = 'none';
+      yield* this.say('collection.lieLow.rivalsGiveUp');
+    } else {
+      yield* this.say('collection.lieLow.rivalsWait', {}, { noCalls: true });
+    }
+  }
+
+  /** The calls that make sense straight after the line being written. */
+  private callsNow(threat: Threat | undefined): Call[] {
+    if (this.pulledOut) return [];
+    const calls: Call[] = [];
+    const beforeTheMoney = this.stage !== 'leave' && this.money === 0;
+    if (beforeTheMoney) {
+      calls.push('pullOut');
+    }
+    if (
+      beforeTheMoney &&
+      this.stage === 'inside' &&
+      !this.loud &&
+      !this.escalated &&
+      !this.lockedOut
+    ) {
+      calls.push('goLoud');
+    }
+    if (threat) {
+      calls.push('lieLow');
+    }
+    return calls;
+  }
+
+  /**
+   * Writes one line to the log and hands it to whoever is watching, with the calls the crew
+   * could act on now. Lying low happens here and then the job carries on. Pulling out and
+   * going loud drop what the crew was doing, so they unwind to the stage that deals with them.
+   */
+  private *say(
+    key: CollectionKey,
+    extra: Readonly<Record<string, string | number>> = {},
+    options: SayOptions = {},
+  ): Beats<Call | undefined> {
+    const index = this.log.length;
+    const entry: LogEntry = {
+      minute: this.minute,
+      key,
+      params: { ...this.baseParams, ...extra },
+      ...(options.subject ? { subject: options.subject } : {}),
+    };
+    this.log.push(entry);
+
+    const calls = options.noCalls ? [] : this.callsNow(options.threat);
+    const call = yield { index, entry, calls };
+    if (call === undefined || !calls.includes(call)) return undefined;
+
+    this.callsMade.push({ beat: index, call });
+    switch (call) {
+      case 'lieLow':
+        if (options.threat) yield* this.lieLow(options.threat);
+        return call;
+      case 'pullOut':
+      case 'goLoud':
+        throw new ChangeOfPlan(call);
+    }
   }
 
   private result(): CollectionResult {
-    const outcome: Outcome =
-      this.arrests.length > 0
+    const outcome: Outcome = this.pulledOut
+      ? 'calledOff'
+      : this.arrests.length > 0
         ? 'busted'
         : this.money === 0
           ? 'botched'
@@ -459,15 +775,18 @@ class CollectionRun {
       arrests: [...this.arrests],
       ratings,
       log: [...this.log],
+      calls: [...this.callsMade],
     };
   }
 
-  private injure(role: Role, severity: Injury['severity']): void {
+  private *injure(role: Role, severity: Injury['severity']): Beats {
     this.injuries.push({ memberId: this.plan.crew[role].id, severity });
-    this.say(severity === 'serious' ? 'collection.injury.serious' : 'collection.injury.minor', {
-      name: this.plan.crew[role].firstName,
-    });
     this.rate(role, severity === 'serious' ? -0.8 : -0.3);
+    yield* this.say(
+      severity === 'serious' ? 'collection.injury.serious' : 'collection.injury.minor',
+      { name: this.plan.crew[role].firstName },
+      { subject: role },
+    );
   }
 
   private test(role: Role, skill: Skill, difficulty: number, bonus = 0): CheckResult {
@@ -478,10 +797,6 @@ class CollectionRun {
     return ROLES.map((role) => this.plan.crew[role]).reduce((best, member) =>
       member.skills.planning > best.skills.planning ? member : best,
     );
-  }
-
-  private say(key: MessageKey, extra: Readonly<Record<string, string | number>> = {}): void {
-    this.log.push({ minute: this.minute, key, params: { ...this.baseParams, ...extra } });
   }
 
   private wait(min: number, max: number): void {

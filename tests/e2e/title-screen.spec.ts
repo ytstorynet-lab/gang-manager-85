@@ -14,7 +14,7 @@ test('the browser build opens on the title screen with the city behind it', asyn
   await expect(page).toHaveTitle("Gang Manager '85");
   await expect(page.getByRole('heading', { name: "Gang Manager '85" })).toBeVisible();
   await expect(page.getByTestId('city-view')).toHaveAttribute('data-ready', 'true');
-  await expect(page.getByRole('button', { name: 'New game' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Watch a job' })).toBeEnabled();
   await expect(page.getByText('Browser build')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Quit' })).toHaveCount(0);
 
