@@ -1,0 +1,19 @@
+# Packages the desktop build. Windows is the only platform we ship.
+appId: com.ytstorynet.gangmanager85
+productName: Gang Manager 85
+copyright: Copyright © 2026 ytstorynet
+directories:
+  output: dist-app
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+asar: true
+npmRebuild: false
+win:
+  target:
+    # The unpacked folder is what gets uploaded to Steam; the zip is for testing.
+    - target: dir
+      arch: x64
+    - target: zip
+      arch: x64
