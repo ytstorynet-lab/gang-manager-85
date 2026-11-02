@@ -11,6 +11,8 @@ export interface District {
 
 /** A business that pays for protection. Names are invented. */
 export interface Business {
+  /** A short name for the code and the art. Never shown to the player. */
+  readonly id: string;
   readonly name: string;
   /** How hard the owner pushes back, 1 to 20. */
   readonly resolve: number;
@@ -28,11 +30,11 @@ export const BEACH_STRIP: District = {
 };
 
 export const BEACH_STRIP_BUSINESSES: readonly Business[] = [
-  { name: 'Starlight Lounge', resolve: 12, envelope: 1800, doorman: 11 },
-  { name: 'Coral Wash Laundromat', resolve: 7, envelope: 600, doorman: 0 },
-  { name: 'Neptune Video', resolve: 9, envelope: 700, doorman: 0 },
-  { name: 'Sunny Side Diner', resolve: 8, envelope: 900, doorman: 0 },
-  { name: 'Palm Court Motel', resolve: 11, envelope: 1200, doorman: 8 },
-  { name: 'Lucky Seven Arcade', resolve: 14, envelope: 1400, doorman: 12 },
-  { name: 'Flamingo Car Wash', resolve: 10, envelope: 1000, doorman: 6 },
+  { id: 'starlight', name: 'Starlight Lounge', resolve: 12, envelope: 1800, doorman: 11 },
+  { id: 'coral-wash', name: 'Coral Wash Laundromat', resolve: 7, envelope: 600, doorman: 0 },
+  { id: 'neptune', name: 'Neptune Video', resolve: 9, envelope: 700, doorman: 0 },
+  { id: 'sunny-side', name: 'Sunny Side Diner', resolve: 8, envelope: 900, doorman: 0 },
+  { id: 'palm-court', name: 'Palm Court Motel', resolve: 11, envelope: 1200, doorman: 8 },
+  { id: 'lucky-seven', name: 'Lucky Seven Arcade', resolve: 14, envelope: 1400, doorman: 12 },
+  { id: 'flamingo', name: 'Flamingo Car Wash', resolve: 10, envelope: 1000, doorman: 6 },
 ];

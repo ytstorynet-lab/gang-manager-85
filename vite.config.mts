@@ -15,6 +15,8 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     target: 'es2022',
+    // Keep every image as its own file rather than tucking small ones into the code.
+    assetsInlineLimit: 0,
   },
   server: { port: 5173, strictPort: true },
   preview: { port: 4173, strictPort: true },

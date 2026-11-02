@@ -1,0 +1,32 @@
+{
+  "size": [128, 39],
+  "frames": {
+    "alert": [20, 25, 1, 5],
+    "car-crew": [40, 2, 7, 13],
+    "car-crew-dark": [49, 2, 7, 13],
+    "car-patrol": [58, 2, 7, 13],
+    "car-patrol-blue": [67, 2, 7, 13],
+    "car-patrol-red": [76, 2, 7, 13],
+    "car-rivals": [2, 25, 7, 12],
+    "car-rivals-dark": [11, 25, 7, 12],
+    "car-traffic-1": [85, 2, 7, 13],
+    "car-traffic-2": [94, 2, 7, 13],
+    "car-traffic-3": [103, 2, 7, 13],
+    "car-traffic-4": [112, 2, 7, 13],
+    "chevron-crew": [89, 25, 3, 2],
+    "chevron-rivals": [94, 25, 3, 2],
+    "cone": [25, 2, 13, 16],
+    "glow": [2, 2, 21, 21],
+    "person-caller": [23, 25, 4, 3],
+    "person-doorman": [29, 25, 4, 3],
+    "person-driver": [35, 25, 4, 3],
+    "person-local-1": [41, 25, 4, 3],
+    "person-local-2": [47, 25, 4, 3],
+    "person-local-3": [53, 25, 4, 3],
+    "person-local-4": [59, 25, 4, 3],
+    "person-local-5": [65, 25, 4, 3],
+    "person-lookout": [71, 25, 4, 3],
+    "person-muscle": [77, 25, 4, 3],
+    "person-talker": [83, 25, 4, 3]
+  }
+}

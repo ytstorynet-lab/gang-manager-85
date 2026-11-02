@@ -19,3 +19,6 @@ Thumbs.db
 
 # Steamworks SDK files are downloaded separately and never committed
 steamworks_sdk/
+
+# Python art tools
+__pycache__/

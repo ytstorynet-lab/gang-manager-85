@@ -61,5 +61,18 @@ export function renderCollection(plan: CollectionPlan, result: CollectionResult)
       (role) => `${crew[role].firstName} ${result.ratings[role].toFixed(1)}`,
     ).join(' · ')}`,
   ];
+  if (result.calls.length > 0) {
+    lines.push(`${t('results.calls')}: ${callsText(result)}`);
+  }
   return lines;
+}
+
+/** The boss's calls with their times, such as "Go loud at 23:41". */
+export function callsText(result: CollectionResult): string {
+  return result.calls
+    .map((made) => {
+      const minute = result.log[made.beat]?.minute ?? 0;
+      return t('results.callAt', { call: t(`call.${made.call}`), time: formatTime(minute) });
+    })
+    .join(' · ');
 }
