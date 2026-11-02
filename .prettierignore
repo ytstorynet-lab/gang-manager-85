@@ -1,0 +1,7 @@
+dist/
+dist-electron/
+dist-app/
+test-results/
+playwright-report/
+coverage/
+package-lock.json

@@ -1,0 +1,126 @@
+:root {
+  --ground: #120f24;
+  --panel: rgba(12, 10, 26, 0.88);
+  --line: #36305e;
+  --line-strong: #6a63a0;
+  --text: #f4f0ff;
+  --text-muted: #b9b0dc;
+  --pink: #ff5fa8;
+  --cyan: #48dcea;
+  --ink-on-pink: #1a0f1f;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: 'Barlow Semi Condensed', system-ui, sans-serif;
+}
+
+#app {
+  height: 100%;
+}
+
+.title-screen {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.city-view {
+  position: absolute;
+  inset: 0;
+}
+
+.city-view canvas {
+  display: block;
+}
+
+.title-panel {
+  position: absolute;
+  left: 48px;
+  bottom: 48px;
+  width: min(420px, calc(100% - 96px));
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.logo {
+  margin: 0;
+  font-family: 'Silkscreen', monospace;
+  font-weight: 400;
+  font-size: 40px;
+  line-height: 1.1;
+  color: var(--pink);
+  text-shadow: 0 0 12px rgba(255, 95, 168, 0.45);
+}
+
+.tagline {
+  margin: 0;
+  font-size: 20px;
+  color: var(--text-muted);
+}
+
+.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.menu-button {
+  height: 48px;
+  padding: 0 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font:
+    700 18px 'Barlow Semi Condensed',
+    system-ui,
+    sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-button.primary {
+  background: var(--pink);
+  border-color: var(--pink);
+  color: var(--ink-on-pink);
+}
+
+.menu-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.menu-button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.menu-note {
+  margin: -2px 0 4px;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+
+.build-info {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
