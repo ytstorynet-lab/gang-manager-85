@@ -2,7 +2,7 @@
 
 Run a crew in Rico City, 1985. A crime management game for Windows PC, with the depth of a football management game and a GTA-style satirical setting.
 
-**Status:** step 1 of 6, project setup. Nothing is playable yet; the title screen is a placeholder.
+**Status:** step 2 of 6, the simulation on its own. Crew members and the first job (the collection) run as plain text from the command line. The title screen is still a placeholder.
 
 ## Run it on your Mac
 
@@ -17,16 +17,20 @@ Then open <http://localhost:5173>. The page reloads as soon as the code changes.
 
 ## Commands
 
-| Command            | What it does                                                  |
-| ------------------ | ------------------------------------------------------------- |
-| `npm run dev`      | Runs the browser build with live reload                       |
-| `npm test`         | Runs the unit tests (Vitest)                                  |
-| `npm run test:e2e` | Builds the game and runs the browser test (Playwright)        |
-| `npm run check`    | Type check, lint, formatting check and unit tests in one go   |
-| `npm run electron` | Builds the game and opens the desktop version                 |
-| `npm run dist:win` | Packages the Windows build (GitHub Actions does this for you) |
+| Command             | What it does                                                                |
+| ------------------- | --------------------------------------------------------------------------- |
+| `npm run dev`       | Runs the browser build with live reload                                     |
+| `npm run sim`       | Plays one collection and prints it as a play-by-play                        |
+| `npm run sim:batch` | Plays 1,000 collections per crew level and approach, and prints the balance |
+| `npm test`          | Runs the unit tests (Vitest)                                                |
+| `npm run test:e2e`  | Builds the game and runs the browser test (Playwright)                      |
+| `npm run check`     | Type check, lint, formatting check and unit tests in one go                 |
+| `npm run electron`  | Builds the game and opens the desktop version                               |
+| `npm run dist:win`  | Packages the Windows build (GitHub Actions does this for you)               |
 
 Before your first browser test, install Playwright's browser with `npx playwright install chromium`.
+
+`npm run sim` takes options: `npm run sim -- --seed 1985 --approach loud --quality 14`. The same seed always plays out the same way. [How the collection works](docs/collection-job.md) explains the rules and numbers behind it.
 
 ## The Windows build
 
@@ -34,16 +38,18 @@ GitHub Actions runs every check on each pull request and each push to `main`. It
 
 ## How the code is laid out
 
-| Folder      | What's in it                                                                                            |
-| ----------- | ------------------------------------------------------------------------------------------------------- |
-| `src/sim`   | The simulation. No graphics, no browser and no `Math.random()`, so tests can replay thousands of years. |
-| `src/ui`    | The management screens, in plain HTML and CSS.                                                          |
-| `src/city`  | The top-down city view, drawn with PixiJS.                                                              |
-| `src/i18n`  | Every piece of text the player sees, ready for translation.                                             |
-| `src/store` | One interface for Steam and the other stores, plus a fake store for tests.                              |
-| `electron`  | The desktop shell for Windows.                                                                          |
-| `tests`     | Unit tests, the browser test and the desktop test.                                                      |
-| `docs`      | The licence register.                                                                                   |
+| Folder       | What's in it                                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------- |
+| `src/sim`    | The simulation. No graphics, no browser and no `Math.random()`, so tests can replay thousands of years. |
+| `src/report` | Turns simulation results into readable text.                                                            |
+| `tools`      | Command-line tools for playing and balancing the simulation.                                            |
+| `src/ui`     | The management screens, in plain HTML and CSS.                                                          |
+| `src/city`   | The top-down city view, drawn with PixiJS.                                                              |
+| `src/i18n`   | Every piece of text the player sees, ready for translation.                                             |
+| `src/store`  | One interface for Steam and the other stores, plus a fake store for tests.                              |
+| `electron`   | The desktop shell for Windows.                                                                          |
+| `tests`      | Unit tests, the browser test and the desktop test.                                                      |
+| `docs`       | How the jobs work, and the licence register.                                                            |
 
 ## Ground rules
 

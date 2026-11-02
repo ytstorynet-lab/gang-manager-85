@@ -21,6 +21,7 @@
     "tests",
     "vite.config.mts",
     "playwright.config.ts",
-    "playwright.electron.config.ts"
+    "playwright.electron.config.ts",
+    "tools"
   ]
 }
